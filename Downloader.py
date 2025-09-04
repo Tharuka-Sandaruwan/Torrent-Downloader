@@ -130,6 +130,58 @@ def get_available_disk_space(path):
         print(f"Error checking disk space: {e}")
         return 0
 
+def find_torrent_files():
+    """Find all .torrent files in the current directory."""
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    torrent_files = []
+    
+    for file in os.listdir(script_dir):
+        if file.lower().endswith('.torrent'):
+            torrent_files.append(os.path.join(script_dir, file))
+    
+    return torrent_files
+
+def select_torrent_file(torrent_files):
+    """Let user select a torrent file from the available options."""
+    if not torrent_files:
+        print("❌ No .torrent files found in the current directory.")
+        print("   Please either:")
+        print("   1. Place a .torrent file in the same directory as this script, or")
+        print("   2. Provide a magnet link as an argument")
+        return None
+    
+    if len(torrent_files) == 1:
+        print(f"📁 Found 1 torrent file: {os.path.basename(torrent_files[0])}")
+        return torrent_files[0]
+    
+    print(f"📁 Found {len(torrent_files)} torrent files:")
+    for i, file_path in enumerate(torrent_files, 1):
+        file_name = os.path.basename(file_path)
+        try:
+            # Try to get torrent info for display
+            info = lt.torrent_info(file_path)
+            file_count = info.num_files()
+            total_size = format_size(info.total_size())
+            print(f"  {i}. {file_name} ({file_count} files, {total_size})")
+        except:
+            print(f"  {i}. {file_name}")
+    
+    while True:
+        try:
+            choice = input(f"\nSelect torrent file (1-{len(torrent_files)}): ").strip()
+            index = int(choice) - 1
+            if 0 <= index < len(torrent_files):
+                selected_file = torrent_files[index]
+                print(f"✅ Selected: {os.path.basename(selected_file)}")
+                return selected_file
+            else:
+                print(f"❌ Invalid choice. Please enter a number between 1 and {len(torrent_files)}")
+        except ValueError:
+            print("❌ Invalid input. Please enter a number.")
+        except KeyboardInterrupt:
+            print("\n❌ Operation cancelled.")
+            return None
+
 def get_system_resources():
     """Get basic system resource information for optimization."""
     try:
@@ -270,10 +322,29 @@ def verify_downloaded_files(handle, save_path, desired_files, small_server_mode=
     
     return verification_results
 
-def download_torrent(magnet_link, save_path):
+def download_torrent(source, save_path):
     """
-    Downloads selected files from a torrent from a magnet link with settings optimized for low RAM.
+    Downloads selected files from a torrent using either a magnet link or torrent file.
+    
+    Args:
+        source: Either a magnet link (string starting with 'magnet:') or path to .torrent file
+        save_path: Directory to save downloaded files
     """
+    # Determine if source is magnet link or torrent file
+    is_magnet = isinstance(source, str) and source.startswith("magnet:")
+    is_torrent_file = isinstance(source, str) and os.path.isfile(source) and source.lower().endswith('.torrent')
+    
+    if not is_magnet and not is_torrent_file:
+        print(f"❌ Invalid source: {source}")
+        print("   Source must be either a magnet link or a .torrent file")
+        return
+    
+    # Display source information
+    if is_magnet:
+        print(f"🧲 Using magnet link")
+    else:
+        print(f"📁 Using torrent file: {os.path.basename(source)}")
+    
     # Get the absolute path for the save directory
     save_path = os.path.abspath(save_path)
     if not os.path.exists(save_path):
@@ -310,16 +381,31 @@ def download_torrent(magnet_link, save_path):
     ses = lt.session(settings)
 
     # --- Phase 1: Add Torrent in Paused State to Get Metadata ---
-    params = lt.parse_magnet_uri(magnet_link)
-    params.save_path = save_path
-    # Add the torrent paused, so we can select files before downloading
-    params.flags |= lt.torrent_flags.paused
-    handle = ses.add_torrent(params)
-
-    print("Downloading metadata...")
-    while not handle.has_metadata():
-        time.sleep(1)
-    print("Metadata received.")
+    if is_magnet:
+        # Handle magnet link
+        params = lt.parse_magnet_uri(source)
+        params.save_path = save_path
+        # Add the torrent paused, so we can select files before downloading
+        params.flags |= lt.torrent_flags.paused
+        handle = ses.add_torrent(params)
+        
+        print("Downloading metadata from magnet link...")
+        while not handle.has_metadata():
+            time.sleep(1)
+        print("Metadata received.")
+    else:
+        # Handle torrent file
+        try:
+            params = lt.add_torrent_params()
+            params.ti = lt.torrent_info(source)
+            params.save_path = save_path
+            # Add the torrent paused, so we can select files before downloading
+            params.flags |= lt.torrent_flags.paused
+            handle = ses.add_torrent(params)
+            print("Torrent file loaded successfully.")
+        except Exception as e:
+            print(f"❌ Error loading torrent file: {e}")
+            return
 
     # --- Phase 2: Generate File List for User Selection ---
     ti = handle.get_torrent_info()
@@ -523,14 +609,54 @@ def download_torrent(magnet_link, save_path):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python optimized_downloader.py \"<magnet_link>\"")
-        sys.exit(1)
-
-    magnet_link_arg = sys.argv[1]
+    print("🌊 Torrent Downloader - Smart File Selection & Verification")
+    print("=" * 60)
     
-    if not magnet_link_arg.startswith("magnet:?xt=urn:btih:"):
-        print("Error: Invalid magnet link provided.")
-        sys.exit(1)
+    if len(sys.argv) == 1:
+        # No arguments provided - look for torrent files in current directory
+        print("🔍 No magnet link provided. Searching for .torrent files...")
+        torrent_files = find_torrent_files()
+        selected_file = select_torrent_file(torrent_files)
         
-    download_torrent(magnet_link_arg, SAVE_PATH)
+        if selected_file:
+            download_torrent(selected_file, SAVE_PATH)
+        else:
+            print("\n📋 Usage Options:")
+            print("  1. Place a .torrent file in the same directory as this script and run:")
+            print(f"     python {os.path.basename(__file__)}")
+            print("  2. Or provide a magnet link:")
+            print(f"     python {os.path.basename(__file__)} \"<magnet_link>\"")
+            sys.exit(1)
+    
+    elif len(sys.argv) == 2:
+        source_arg = sys.argv[1]
+        
+        # Check if argument is a magnet link
+        if source_arg.startswith("magnet:?xt=urn:btih:"):
+            print("🧲 Magnet link detected")
+            download_torrent(source_arg, SAVE_PATH)
+        
+        # Check if argument is a path to a torrent file
+        elif os.path.isfile(source_arg) and source_arg.lower().endswith('.torrent'):
+            print("📁 Torrent file path detected")
+            download_torrent(source_arg, SAVE_PATH)
+        
+        else:
+            print("❌ Error: Invalid argument provided.")
+            print("   Expected either:")
+            print("   - A magnet link starting with 'magnet:?xt=urn:btih:'")
+            print("   - A path to a .torrent file")
+            print("\n📋 Usage Examples:")
+            print(f"   python {os.path.basename(__file__)} \"magnet:?xt=urn:btih:...\"")
+            print(f"   python {os.path.basename(__file__)} \"path/to/file.torrent\"")
+            print(f"   python {os.path.basename(__file__)}  # Auto-detect .torrent files")
+            sys.exit(1)
+    
+    else:
+        print("❌ Error: Too many arguments provided.")
+        print(f"Usage: python {os.path.basename(__file__)} [magnet_link_or_torrent_file]")
+        print("\nExamples:")
+        print(f"  python {os.path.basename(__file__)}  # Auto-detect .torrent files")
+        print(f"  python {os.path.basename(__file__)} \"magnet:?xt=urn:btih:...\"")
+        print(f"  python {os.path.basename(__file__)} \"file.torrent\"")
+        sys.exit(1)

@@ -1,12 +1,14 @@
 # 🌊 Torrent Downloader
 
-A smart, resource-efficient torrent downloader optimized for both powerful servers and small VPS instances. Features intelligent file selection, disk space checking, integrity verification, and automatic optimization based on your system resources.
+A smart, resource-efficient torrent downloader optimized for both powerful servers and small VPS instances. Features intelligent file selection, disk space checking, integrity verification, and automatic optimization based on your system resources. **Now supports both magnet links and torrent files!**
 
 ## ✨ Features
 
 - 🎯 **Selective Download**: Choose specific files from torrents
-- 💾 **Smart Disk Space Check**: Prevents downloads if insufficient storage
-- 🔍 **Integrity Verification**: Automatic file corruption detection
+- 🧲 **Dual Input Support**: Works with magnet links AND .torrent files
+- � **Auto-Detection**: Automatically finds .torrent files in the script directory
+- �💾 **Smart Disk Space Check**: Prevents downloads if insufficient storage
+- �️ **Integrity Verification**: Automatic file corruption detection
 - ⚡ **Auto-Optimization**: Adapts to your server's CPU and RAM
 - 🖥️ **Small Server Ready**: Works great on VPS with limited resources
 - 🛑 **Proper Completion**: Stops downloading exactly when files are complete
@@ -43,49 +45,92 @@ pip install libtorrent-python
 
 ## 🚀 Quick Start
 
-### Basic Usage
+### Three Ways to Use
 
+#### Option 1: Auto-detect torrent files (Easiest)
+```bash
+# Place any .torrent file(s) in the same folder as the script, then run:
+python Downloader.py
+```
+
+#### Option 2: Use a magnet link
 ```bash
 python Downloader.py "magnet:?xt=urn:btih:YOUR_MAGNET_LINK_HERE"
 ```
 
+#### Option 3: Specify a torrent file path
+```bash
+python Downloader.py "path/to/your/file.torrent"
+```
+
 ### Step-by-Step Process
 
-1. **Run the command** with your magnet link
-2. **Wait for metadata** to be downloaded
-3. **Edit the file list** that gets created
-4. **Press Enter** to start downloading
-5. **Wait for completion** and verification
+1. **Choose your input method** (torrent file or magnet link)
+2. **Run the command**
+3. **Wait for metadata** to be loaded
+4. **Edit the file list** that gets created
+5. **Press Enter** to start downloading
+6. **Wait for completion** and verification
 
 ## 📖 Detailed Usage Guide
 
-### Step 1: Get a Magnet Link
+### Input Methods
 
-A magnet link looks like this:
+The downloader supports three input methods:
+
+#### Method 1: Auto-Detection (Recommended for servers)
+1. Place your `.torrent` file(s) in the same directory as `Downloader.py`
+2. Run without any arguments:
+   ```bash
+   python Downloader.py
+   ```
+3. If multiple torrent files are found, you'll be prompted to choose one
+
+#### Method 2: Magnet Links
+Magnet links look like this:
 ```
 magnet:?xt=urn:btih:1234567890abcdef1234567890abcdef12345678&dn=Example+File&tr=udp://tracker.example.com:1337
 ```
 
-You can find magnet links on torrent sites, forums, or file sharing platforms.
+Usage:
+```bash
+python Downloader.py "magnet:?xt=urn:btih:YOUR_MAGNET_LINK"
+```
 
-### Step 2: Start the Download
+#### Method 3: Torrent File Path
+You can specify the path to a torrent file:
+```bash
+python Downloader.py "/path/to/your/file.torrent"
+```
 
-Open your terminal/command prompt and run:
+### Step 1: Choose Your Method
 
+**For Server Deployment (Easiest):**
+```bash
+# Just place movie.torrent in the same folder and run:
+python Downloader.py
+```
+
+**For Magnet Links:**
 ```bash
 # Windows
 python Downloader.py "magnet:?xt=urn:btih:YOUR_MAGNET_LINK"
 
-# Linux/Mac
+# Linux/Mac  
 python3 Downloader.py "magnet:?xt=urn:btih:YOUR_MAGNET_LINK"
 ```
 
-**Important**: Always put the magnet link in quotes!
+**For Specific Torrent Files:**
+```bash
+python Downloader.py "MyMovie.torrent"
+```
 
-### Step 3: File Selection
+**Important**: Always put magnet links in quotes!
+
+### Step 2: File Selection
 
 The downloader will:
-1. Connect to peers and download metadata
+1. Load the torrent data (from file or magnet link)
 2. Create a file called `[TorrentName]_files.txt`
 3. Show you this message:
 
@@ -97,7 +142,7 @@ The downloader will:
 4. Press Enter here to continue the download...
 ```
 
-### Step 4: Edit the File List
+### Step 3: Edit the File List
 
 Open the created `.txt` file in any text editor. You'll see something like:
 
@@ -120,7 +165,7 @@ Example - if you only want Movie1:
 
 Save the file and go back to the terminal.
 
-### Step 5: Start Download
+### Step 4: Start Download
 
 Press `Enter` in the terminal. The downloader will:
 
@@ -166,6 +211,22 @@ By default, files download to a `downloads` folder. To change this:
 
 ### Common Issues
 
+**"Invalid argument provided"**
+- For magnet links: Make sure it starts with `magnet:?xt=urn:btih:`
+- For torrent files: Ensure the file exists and has `.torrent` extension
+- Put magnet links in quotes
+- Check for copy-paste errors
+
+**"No .torrent files found"**
+- Place at least one `.torrent` file in the same directory as the script
+- Ensure the file has the correct `.torrent` extension
+- Check file permissions
+
+**"Error loading torrent file"**
+- The torrent file may be corrupted
+- Try downloading the torrent file again
+- Ensure the file is a valid .torrent file
+
 **"Invalid magnet link provided"**
 - Make sure the magnet link starts with `magnet:?xt=urn:btih:`
 - Put the entire link in quotes
@@ -203,6 +264,7 @@ After running the downloader, you'll see:
 ```
 your-folder/
 ├── Downloader.py           # The main script
+├── movie.torrent           # Your torrent file (optional)
 ├── downloads/              # Downloaded files go here
 │   ├── Movie1.mkv
 │   └── Movie1.srt
@@ -265,26 +327,37 @@ For automated deployments, you can pre-create the file list:
 
 ## 📝 Examples
 
-### Example 1: Download a Single Movie
+### Example 1: Auto-detect torrent file (Server-friendly)
+```bash
+# Place movie.torrent in the script directory, then:
+python Downloader.py
+# Script will automatically find and use movie.torrent
+```
+
+### Example 2: Download with magnet link
 ```bash
 python Downloader.py "magnet:?xt=urn:btih:abcd1234..."
-# Edit the file list to keep only the movie file
+# Edit the file list to keep only the files you want
 # Press Enter to start
 ```
 
-### Example 2: Download Selected Episodes
+### Example 3: Specify torrent file path
 ```bash
-python Downloader.py "magnet:?xt=urn:btih:efgh5678..."
-# Keep only episodes 1, 5, and 10 from the file list
-# Delete all other lines
+python Downloader.py "path/to/MyMovie.torrent"
+# Keep only the movie file in the file list
 # Press Enter to start
 ```
 
-### Example 3: Download Everything
+### Example 4: Multiple torrent files
 ```bash
-python Downloader.py "magnet:?xt=urn:btih:ijkl9012..."
-# Don't edit the file list - keep all files
-# Press Enter to download everything
+# Place several .torrent files in the directory:
+# movie1.torrent, series.torrent, music.torrent
+python Downloader.py
+# You'll be prompted to choose which one to download:
+# 1. movie1.torrent (5 files, 2.3 GB)
+# 2. series.torrent (24 files, 15.2 GB)  
+# 3. music.torrent (45 files, 312 MB)
+# Select torrent file (1-3): 2
 ```
 
 ## ⚠️ Important Notes
