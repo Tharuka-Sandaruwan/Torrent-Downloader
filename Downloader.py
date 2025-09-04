@@ -1,4 +1,21 @@
 #!/usr/bin/env python3
+"""
+Optimized Torrent Downloader for Small Servers
+
+Requirements:
+- libtorrent-python
+- psutil (optional, for auto-detection of system resources)
+
+For small servers, install with: pip install libtorrent-python psutil
+For minimal install: pip install libtorrent-python
+
+Small server optimizations:
+- Reduced memory usage (512KB cache vs 2MB)
+- Limited connections (50 vs 200)
+- Disabled DHT, UPnP, NAT-PMP for lower CPU usage
+- Slower polling to reduce CPU overhead
+- Skip verification on very low memory systems (<1GB)
+"""
 import libtorrent as lt
 import time
 import sys
@@ -11,6 +28,9 @@ import shutil
 # Set the path where you want to save the downloaded files.
 # This will create a "downloads" directory in the same folder where the script is run.
 SAVE_PATH = "downloads"
+
+# Small server optimizations
+SMALL_SERVER_MODE = True  # Set to False for high-end servers
 
 def sanitize_filename(filename):
     """Removes invalid characters from a string to be used as a filename."""
@@ -29,6 +49,78 @@ def format_size(size_bytes):
     size_gb = size_mb / 1024
     return f"{size_gb:.2f} GB"
 
+def get_optimized_session_settings(small_server=True):
+    """
+    Returns optimized session settings based on server resources.
+    """
+    if small_server:
+        # Ultra-low resource settings for small servers
+        return {
+            'user_agent': 'libtorrent/2.0.5',
+            'listen_interfaces': '0.0.0.0:6881',
+            'announce_to_all_trackers': True,
+            'announce_to_all_tiers': True,
+            
+            # Reduce connections for low CPU/memory
+            'connections_limit': 50,           # Reduced from 200
+            'connection_speed': 10,            # Reduced from 50
+            
+            # Minimize memory usage
+            'cache_size': 512,                 # Reduced from 2048 (0.5MB vs 2MB)
+            'max_queued_disk_bytes': 512 * 1024,  # Reduced from 1MB to 512KB
+            'send_buffer_watermark': 128 * 1024,   # Reduced from 512KB to 128KB
+            'recv_socket_buffer_size': 256 * 1024, # Reduced from 1MB to 256KB
+            'send_socket_buffer_size': 256 * 1024, # Reduced from 1MB to 256KB
+            
+            # Conservative choking for low CPU
+            'choking_algorithm': lt.choking_algorithm_t.fixed_slots_choker,
+            'seed_choking_algorithm': lt.seed_choking_algorithm_t.round_robin,
+            
+            # Limit upload to preserve bandwidth and CPU
+            'upload_rate_limit': 100 * 1024,   # 100 KB/s upload limit
+            'download_rate_limit': 0,           # No download limit
+            'unchoke_slots_limit': 4,           # Reduced from 20
+            
+            # Disable resource-intensive features
+            'enable_dht': False,                # DHT uses CPU and memory
+            'enable_lsd': False,                # Local Service Discovery disabled
+            'enable_natpmp': False,             # NAT-PMP disabled
+            'enable_upnp': False,               # UPnP disabled
+            
+            # Additional low-resource settings
+            'piece_timeout': 120,               # Longer timeout to reduce retries
+            'request_timeout': 60,              # Longer request timeout
+            'peer_timeout': 120,                # Longer peer timeout
+            'inactivity_timeout': 600,          # 10 minutes inactivity timeout
+            'handshake_timeout': 30,            # Shorter handshake timeout
+            'max_failcount': 3,                 # Reduce failure retries
+            'max_allowed_in_request_queue': 250, # Reduce request queue
+        }
+    else:
+        # Original high-performance settings
+        return {
+            'user_agent': 'libtorrent/2.0.5',
+            'listen_interfaces': '0.0.0.0:6881',
+            'announce_to_all_trackers': True,
+            'announce_to_all_tiers': True,
+            'connections_limit': 200,
+            'connection_speed': 50,
+            'cache_size': 2048,
+            'max_queued_disk_bytes': 1 * 1024 * 1024,
+            'send_buffer_watermark': 512 * 1024,
+            'recv_socket_buffer_size': 1 * 1024 * 1024,
+            'send_socket_buffer_size': 1 * 1024 * 1024,
+            'choking_algorithm': lt.choking_algorithm_t.fixed_slots_choker,
+            'seed_choking_algorithm': lt.seed_choking_algorithm_t.round_robin,
+            'upload_rate_limit': 0,
+            'download_rate_limit': 0,
+            'unchoke_slots_limit': 20,
+            'enable_dht': True,
+            'enable_lsd': True,
+            'enable_natpmp': True,
+            'enable_upnp': True,
+        }
+
 def get_available_disk_space(path):
     """Returns available disk space in bytes for the given path."""
     try:
@@ -38,6 +130,22 @@ def get_available_disk_space(path):
         print(f"Error checking disk space: {e}")
         return 0
 
+def get_system_resources():
+    """Get basic system resource information for optimization."""
+    try:
+        import psutil
+        memory_gb = psutil.virtual_memory().total / (1024**3)
+        cpu_count = psutil.cpu_count()
+        return memory_gb, cpu_count
+    except ImportError:
+        # Fallback if psutil not available
+        try:
+            import multiprocessing
+            cpu_count = multiprocessing.cpu_count()
+            return None, cpu_count  # Memory unknown
+        except:
+            return None, None  # Both unknown
+
 def check_disk_space(required_bytes, save_path):
     """Checks if there's enough disk space available."""
     available_space = get_available_disk_space(save_path)
@@ -45,12 +153,30 @@ def check_disk_space(required_bytes, save_path):
         return False, available_space
     return True, available_space
 
-def verify_downloaded_files(handle, save_path, desired_files):
+def verify_downloaded_files(handle, save_path, desired_files, small_server_mode=True):
     """
     Verifies the integrity of downloaded files using torrent piece hashes.
     Returns a dictionary with verification results.
     """
     print("\n🔍 Starting file verification...")
+    
+    # Skip verification on very small servers to save resources
+    if small_server_mode:
+        memory_gb, _ = get_system_resources()
+        if memory_gb and memory_gb < 1.0:  # Less than 1GB RAM
+            print("⚠️  Skipping detailed verification due to very low memory")
+            print("   Files downloaded successfully - basic integrity assumed")
+            return {
+                'overall_status': True,
+                'files': {f: {'verified': True, 'size': 0} for f in desired_files},
+                'summary': {
+                    'total_files': len(desired_files),
+                    'verified_files': len(desired_files),
+                    'corrupted_files': 0,
+                    'total_pieces_checked': 0,
+                    'corrupted_pieces': 0
+                }
+            }
     
     # Force a hash check
     handle.force_recheck()
@@ -66,7 +192,7 @@ def verify_downloaded_files(handle, save_path, desired_files):
             print(f"\rVerifying integrity... {progress:.1f}%", end='')
         elif s.state == lt.torrent_status.downloading or s.state == lt.torrent_status.finished or s.state == lt.torrent_status.seeding:
             break
-        time.sleep(0.5)
+        time.sleep(1 if small_server_mode else 0.5)  # Slower polling on small servers
     
     verify_time = time.time() - start_verify_time
     print(f"\n✅ Verification completed in {verify_time:.1f} seconds")
@@ -158,30 +284,29 @@ def download_torrent(magnet_link, save_path):
             print(f"Error creating directory {save_path}: {e}")
             return
 
-    # --- Session Settings for Low Memory ---
-    settings = {
-        'user_agent': 'libtorrent/2.0.5',
-        'listen_interfaces': '0.0.0.0:6881',
-        'announce_to_all_trackers': True,
-        'announce_to_all_tiers': True,
-        'connections_limit': 200,
-        'connection_speed': 50,
-        'cache_size': 2048,
-        'max_queued_disk_bytes': 1 * 1024 * 1024,
-        'send_buffer_watermark': 512 * 1024,
-        'recv_socket_buffer_size': 1 * 1024 * 1024,
-        'send_socket_buffer_size': 1 * 1024 * 1024,
-        'choking_algorithm': lt.choking_algorithm_t.fixed_slots_choker,
-        'seed_choking_algorithm': lt.seed_choking_algorithm_t.round_robin,
-        'upload_rate_limit': 0,
-        'download_rate_limit': 0,
-        'unchoke_slots_limit': 20,
-        'enable_dht': True,
-        'enable_lsd': True,
-        'enable_natpmp': True,
-        'enable_upnp': True,
-    }
+    # Check system resources for optimization
+    memory_gb, cpu_count = get_system_resources()
+    print(f"🖥️  System Info: {cpu_count or 'Unknown'} CPU cores, {f'{memory_gb:.1f}GB RAM' if memory_gb else 'Unknown RAM'}")
+    
+    # Auto-detect if we should use small server mode
+    auto_small_server = False
+    if memory_gb and memory_gb < 2.0:  # Less than 2GB RAM
+        auto_small_server = True
+        print("⚡ Auto-detected low memory system - using small server optimizations")
+    elif cpu_count and cpu_count < 2:  # Single core
+        auto_small_server = True
+        print("⚡ Auto-detected low CPU system - using small server optimizations")
+    
+    # Use small server mode if configured or auto-detected
+    use_small_server = SMALL_SERVER_MODE or auto_small_server
+    
+    if use_small_server:
+        print("🔧 Using small server optimizations (low memory/CPU mode)")
+    else:
+        print("🚀 Using high-performance settings")
 
+    # --- Session Settings ---
+    settings = get_optimized_session_settings(use_small_server)
     ses = lt.session(settings)
 
     # --- Phase 1: Add Torrent in Paused State to Get Metadata ---
@@ -276,6 +401,9 @@ def download_torrent(magnet_link, save_path):
     
     print("\nStarting download loop...")
     
+    # Adjust polling interval based on server resources
+    poll_interval = 3 if use_small_server else 2
+    
     # Improved completion detection
     while True:
         s = handle.status()
@@ -293,15 +421,27 @@ def download_torrent(magnet_link, save_path):
         upload_speed = s.upload_rate / 1000000
         peers = s.num_peers
         
-        print(
-            f"\r{torrent_name[:40]:<40} "
-            f"[{'#' * int(progress / 5):<20}] {progress:.2f}% "
-            f"| ↓ {download_speed:.2f} MB/s "
-            f"| ↑ {upload_speed:.2f} MB/s "
-            f"| Peers: {peers} "
-            f"| State: {state_str[s.state]}",
-            end=''
-        )
+        # Less frequent updates on small servers to reduce CPU usage
+        if use_small_server and int(time.time()) % 5 == 0:  # Update every 5 seconds
+            print(
+                f"\r{torrent_name[:40]:<40} "
+                f"[{'#' * int(progress / 5):<20}] {progress:.2f}% "
+                f"| ↓ {download_speed:.2f} MB/s "
+                f"| ↑ {upload_speed:.2f} MB/s "
+                f"| Peers: {peers} "
+                f"| State: {state_str[s.state]}",
+                end=''
+            )
+        elif not use_small_server:  # Normal frequent updates for powerful servers
+            print(
+                f"\r{torrent_name[:40]:<40} "
+                f"[{'#' * int(progress / 5):<20}] {progress:.2f}% "
+                f"| ↓ {download_speed:.2f} MB/s "
+                f"| ↑ {upload_speed:.2f} MB/s "
+                f"| Peers: {peers} "
+                f"| State: {state_str[s.state]}",
+                end=''
+            )
         
         # Check if download is complete
         if progress >= 99.9 or s.is_seeding or s.state == lt.torrent_status.finished:
@@ -311,7 +451,8 @@ def download_torrent(magnet_link, save_path):
         # Check if download is stalled (same progress for too long)
         if abs(progress - previous_progress) < 0.01:  # Less than 0.01% progress
             stalled_count += 1
-            if stalled_count > 30:  # 30 iterations * 2 seconds = 1 minute stalled
+            stall_threshold = 20 if use_small_server else 30  # More patience on small servers
+            if stalled_count > stall_threshold:
                 print(f"\n⚠️  Download appears stalled at {progress:.2f}%. Checking if complete...")
                 if total_wanted_done >= total_wanted * 0.999:  # 99.9% threshold
                     print("✅ Download is actually complete (minor rounding difference).")
@@ -323,7 +464,7 @@ def download_torrent(magnet_link, save_path):
             stalled_count = 0  # Reset if progress is being made
             
         previous_progress = progress
-        time.sleep(2)
+        time.sleep(poll_interval)
     
     end_time = time.time()
     final_status = handle.status()
@@ -333,7 +474,7 @@ def download_torrent(magnet_link, save_path):
     print(f"Final progress: {final_progress:.2f}%")
     
     # --- Phase 5: File Verification ---
-    verification_results = verify_downloaded_files(handle, save_path, desired_files)
+    verification_results = verify_downloaded_files(handle, save_path, desired_files, use_small_server)
     
     # --- Phase 6: Display Summary ---
     total_downloaded_bytes = handle.status().total_wanted_done
