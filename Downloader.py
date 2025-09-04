@@ -6,7 +6,6 @@ import os
 import re
 import datetime
 import shutil
-import hashlib
 
 # --- Configuration ---
 # Set the path where you want to save the downloaded files.
@@ -144,19 +143,6 @@ def verify_downloaded_files(handle, save_path, desired_files):
             verification_results['overall_status'] = False
     
     return verification_results
-
-def calculate_file_sha1(file_path):
-    """Calculate SHA-1 hash of a file for additional verification."""
-    sha1_hash = hashlib.sha1()
-    try:
-        with open(file_path, "rb") as f:
-            # Read file in chunks to handle large files
-            for chunk in iter(lambda: f.read(4096), b""):
-                sha1_hash.update(chunk)
-        return sha1_hash.hexdigest()
-    except Exception as e:
-        print(f"Error calculating hash for {file_path}: {e}")
-        return None
 
 def download_torrent(magnet_link, save_path):
     """
@@ -382,32 +368,7 @@ def download_torrent(magnet_link, save_path):
 
     # --- Clean Up ---
     print("\n🧹 Cleaning up...")
-    
-    # Ask user if they want additional SHA-1 verification
-    if verification_results['overall_status']:
-        print("\n🔐 Optional: Would you like additional SHA-1 hash verification?")
-        print("   This provides extra security but takes additional time.")
-        choice = input("   Perform SHA-1 verification? (y/N): ").strip().lower()
-        
-        if choice in ['y', 'yes']:
-            print("\n🔐 Performing SHA-1 verification...")
-            for file_path in sorted(list(desired_files)):
-                full_file_path = os.path.join(save_path, file_path)
-                if os.path.exists(full_file_path):
-                    print(f"  Calculating SHA-1 for: {file_path}")
-                    sha1_hash = calculate_file_sha1(full_file_path)
-                    if sha1_hash:
-                        print(f"    SHA-1: {sha1_hash}")
-                    else:
-                        print(f"    ❌ Failed to calculate SHA-1")
-                else:
-                    print(f"    ❌ File not found: {full_file_path}")
-            print("🔐 SHA-1 verification completed.")
-    else:
-        print("\n⚠️  Skipping additional verification due to corruption detected.")
-        print("   Recommendation: Re-download the corrupted files.")
-    
-    print("\nRemoving torrent to stop seeding.")
+    print("Removing torrent to stop seeding.")
     ses.remove_torrent(handle)
     
     try:
